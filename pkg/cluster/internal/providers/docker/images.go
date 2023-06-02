@@ -89,3 +89,25 @@ func sanitizeImage(image string) (string, string) {
 	}
 	return image, image
 }
+
+// save saves images to dest, as in `docker save`
+func saveImage(images []string, dest string) error {
+	commandArgs := append([]string{"save", "-o", dest}, images...)
+	return exec.Command("docker", commandArgs...).Run()
+}
+
+// imageID return the Id of the container image
+func imageID(containerNameOrID string) (string, error) {
+	cmd := exec.Command("docker", "image", "inspect",
+		"-f", "{{ .Id }}",
+		containerNameOrID, // ... against the container
+	)
+	lines, err := exec.OutputLines(cmd)
+	if err != nil {
+		return "", err
+	}
+	if len(lines) != 1 {
+		return "", errors.Errorf("Docker image ID should only be one line, got %d lines", len(lines))
+	}
+	return lines[0], nil
+}

@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster/nodes"
 	"sigs.k8s.io/kind/pkg/errors"
 	"sigs.k8s.io/kind/pkg/exec"
+	"sigs.k8s.io/kind/pkg/fs"
 	"sigs.k8s.io/kind/pkg/log"
 
 	internallogs "sigs.k8s.io/kind/pkg/cluster/internal/logs"
@@ -292,6 +293,84 @@ func (p *provider) Info() (*providers.ProviderInfo, error) {
 		p.info, err = info()
 	}
 	return p.info, err
+}
+
+// LoadImage returns the provider info.
+// The info is cached on the first time of the execution.
+func (p *provider) LoadImage(images []string, nodeList []nodes.Node) error {
+	// Check that the image exists locally and gets its ID, if not return error
+	imageNames := common.RemoveDuplicates(images)
+	var imageIDs []string
+	for _, imageName := range imageNames {
+		imageID, err := imageID(imageName)
+		if err != nil {
+			return fmt.Errorf("image: %q not present locally", imageName)
+		}
+		imageIDs = append(imageIDs, imageID)
+	}
+
+	// Check if the cluster nodes exist
+	if len(nodeList) == 0 {
+		return fmt.Errorf("no nodes found for load images")
+	}
+	// pick only the nodes that don't have the image
+	selectedNodes := map[string]nodes.Node{}
+	fns := []func() error{}
+	for i, imageName := range imageNames {
+		imageID := imageIDs[i]
+		for _, node := range nodeList {
+			exists, reTagRequired, sanitizedImageName := common.CheckIfImageReTagRequired(node, imageID, imageName, nodeutils.ImageTags)
+			if exists && !reTagRequired {
+				continue
+			}
+
+			if reTagRequired {
+				// We will try to re-tag the image. If the re-tag fails, we will fall back to the default behavior of loading
+				// the images into the nodes again
+				//logger.V(0).Infof("Image with ID: %s already present on the node %s but is missing the tag %s. re-tagging...", imageID, node.String(), sanitizedImageName)
+				if err := nodeutils.ReTagImage(node, imageID, sanitizedImageName); err != nil {
+					//logger.Errorf("failed to re-tag image on the node %s due to an error %s. Will load it instead...", node.String(), err)
+					selectedNodes[node.String()] = node
+				}
+				continue
+			}
+			id, err := nodeutils.ImageID(node, imageName)
+			if err != nil || id != imageID {
+				selectedNodes[node.String()] = node
+				//logger.V(0).Infof("Image: %q with ID %q not yet present on node %q, loading...", imageName, imageID, node.String())
+			}
+			continue
+		}
+		// if len(selectedNodes) == 0 && !processed {
+		// 	logger.V(0).Infof("Image: %q with ID %q found to be already present on all nodes.", imageName, imageID)
+		// }
+	}
+
+	// return early if no node needs the image
+	if len(selectedNodes) == 0 {
+		return nil
+	}
+	// Setup the tar path where the images will be saved
+	dir, err := fs.TempDir("", "images-tar")
+	if err != nil {
+		return errors.Wrap(err, "failed to create tempdir")
+	}
+	defer os.RemoveAll(dir)
+	imagesTarPath := filepath.Join(dir, "images.tar")
+	// Save the images into a tar
+	err = saveImage(imageNames, imagesTarPath)
+	if err != nil {
+		return err
+	}
+
+	// Load the images on the selected nodes
+	for _, selectedNode := range selectedNodes {
+		selectedNode := selectedNode // capture loop variable
+		fns = append(fns, func() error {
+			return common.LoadImage(imagesTarPath, selectedNode)
+		})
+	}
+	return errors.UntilErrorConcurrent(fns)
 }
 
 // dockerInfo corresponds to `docker info --format '{{json .}}'`

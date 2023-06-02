@@ -244,3 +244,9 @@ func (p *Provider) CollectLogs(name, dir string) error {
 	// collect and write cluster logs
 	return p.provider.CollectLogs(dir, n)
 }
+
+//LoadImage
+
+func (p *Provider) LoadImage(images []string, nodeList []nodes.Node) error {
+	return p.provider.LoadImage(images, nodeList)
+}

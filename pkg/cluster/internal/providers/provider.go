@@ -47,6 +47,8 @@ type Provider interface {
 	CollectLogs(dir string, nodes []nodes.Node) error
 	// Info returns the provider info
 	Info() (*ProviderInfo, error)
+	// LoadImage load image to node
+	LoadImage(images []string, nodeList []nodes.Node) error
 }
 
 // ProviderInfo is the info of the provider

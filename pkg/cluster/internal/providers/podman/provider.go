@@ -369,6 +369,11 @@ func (p *provider) Info() (*providers.ProviderInfo, error) {
 	return p.info, nil
 }
 
+// LoadImage
+func (p *provider) LoadImage(images []string, nodeList []nodes.Node) error {
+	return errors.Errorf("podman is not impl")
+}
+
 // podmanInfo corresponds to `podman info --format 'json`.
 // The structure is different from `docker info --format '{{json .}}'`,
 // and lacks information about the availability of the cgroup controllers.
